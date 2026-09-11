@@ -2,12 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>To-do</title>
-<link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
-<meta name="theme-color" content="#F4EFE2">
 <style>
   :root {
     --paper: #F4EFE2;
@@ -745,88 +740,8 @@
     </div>
   </div>
 
-<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.18.0/firebase-auth-compat.js"></script>
 <script>
 (function () {
-  // ---- Firebase config (from your Firebase project) ----
-  const firebaseConfig = {
-    apiKey: "AIzaSyCYnhF0e0eulW8kJNJrebG5-2K2_KItNrY",
-    authDomain: "todo-app-87ed7.firebaseapp.com",
-    projectId: "todo-app-87ed7",
-    storageBucket: "todo-app-87ed7.firebasestorage.app",
-    messagingSenderId: "96046918242",
-    appId: "1:96046918242:web:98442a980d2e56d9403f3b"
-  };
-  // --------------------------------------------------------
-
-  const localFallback = {
-    async get(key) {
-      const value = localStorage.getItem(key);
-      return value !== null ? { key, value } : null;
-    },
-    async set(key, value) {
-      localStorage.setItem(key, value);
-      return { key, value };
-    }
-  };
-
-  let docRef = null;
-  let onRemoteChange = () => {};
-  window.__setRemoteChangeHandler = (fn) => { onRemoteChange = fn; };
-
-  let ready = Promise.resolve();
-
-  const firestoreStorage = {
-    async get(key) {
-      await ready;
-      if (!docRef) return localFallback.get(key);
-      try {
-        const snap = await docRef.get();
-        const data = snap.exists ? snap.data() : {};
-        return data[key] !== undefined ? { key, value: data[key] } : null;
-      } catch (e) {
-        return localFallback.get(key);
-      }
-    },
-    async set(key, value) {
-      // mirror locally too, so the app stays instantly responsive even offline
-      localStorage.setItem(key, value);
-      await ready;
-      if (!docRef) return { key, value };
-      try {
-        await docRef.set({ [key]: value }, { merge: true });
-      } catch (e) {}
-      return { key, value };
-    }
-  };
-
-  try {
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    docRef = db.collection('todoApp').doc('shared');
-
-    ready = firebase.auth().signInAnonymously()
-      .then(() => {
-        docRef.onSnapshot((snap) => {
-          if (snap.metadata.hasPendingWrites) return; // ignore our own optimistic write
-          onRemoteChange();
-        });
-      })
-      .catch(() => { docRef = null; });
-
-    window.storage = firestoreStorage;
-  } catch (e) {
-    window.storage = localFallback;
-  }
-
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('sw.js').catch(() => {});
-    });
-  }
-
   const STORAGE_KEY = 'todo:tasks';
   const THEME_KEY = 'todo:paper';
   const LEGEND_KEY = 'todo:legend';
@@ -1594,16 +1509,6 @@
   loadNotifyPref();
   loadEvents();
   load();
-
-  if (window.__setRemoteChangeHandler) {
-    window.__setRemoteChangeHandler(() => {
-      loadTheme();
-      loadLegend();
-      loadNotifyPref();
-      loadEvents();
-      load();
-    });
-  }
 })();
 </script>
 </body>

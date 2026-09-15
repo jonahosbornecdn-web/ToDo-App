@@ -213,12 +213,32 @@
     justify-content: center;
     gap: 2px;
     cursor: grab;
-    opacity: 0;
+    opacity: 0.35;
     transition: opacity 0.12s ease;
     margin-left: -4px;
+    touch-action: none;
   }
 
-  #list li:hover .handle { opacity: 0.55; }
+  .drag-ghost {
+    position: fixed;
+    z-index: 1000;
+    pointer-events: none;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+    border-radius: 4px;
+    padding: 4px 12px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--ink);
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.92;
+  }
+
+  #list li:hover .handle { opacity: 0.7; }
 
   .handle:active { cursor: grabbing; }
 
@@ -533,7 +553,7 @@
 
   .cal-weekdays, .cal-grid {
     display: grid;
-    grid-template-columns: repeat(7, 1fr);
+    grid-template-columns: repeat(7, minmax(0, 1fr));
   }
 
   .cal-weekdays {
@@ -1145,19 +1165,7 @@
       cell.appendChild(chip);
     });
 
-    cell.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      cell.classList.add('drop-target');
-    });
-    cell.addEventListener('dragleave', () => {
-      cell.classList.remove('drop-target');
-    });
-    cell.addEventListener('drop', (e) => {
-      e.preventDefault();
-      cell.classList.remove('drop-target');
-      const taskId = e.dataTransfer.getData('text/plain');
-      if (taskId) setDue(taskId, iso);
-    });
+    cell.dataset.iso = iso;
 
     return cell;
   }
@@ -1330,17 +1338,69 @@
 
       const handle = document.createElement('div');
       handle.className = 'handle';
-      handle.draggable = true;
-      handle.title = 'Drag to reorder';
+      handle.title = 'Drag to reorder or onto the calendar';
       for (let i = 0; i < 6; i++) handle.appendChild(document.createElement('span'));
-      handle.addEventListener('dragstart', (e) => {
-        e.dataTransfer.setData('text/plain', task.id);
-        e.dataTransfer.effectAllowed = 'move';
-        li.classList.add('dragging');
-      });
-      handle.addEventListener('dragend', () => {
+
+      let dragCtx = null;
+
+      function dragMove(e) {
+        if (!dragCtx) return;
+        dragCtx.ghost.style.left = (e.clientX + 14) + 'px';
+        dragCtx.ghost.style.top = (e.clientY + 14) + 'px';
+        clearDragIndicators();
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        if (!el) { dragCtx.target = null; return; }
+        const overLi = el.closest('#list li');
+        if (overLi) {
+          const rect = overLi.getBoundingClientRect();
+          const isAfter = (e.clientY - rect.top) > rect.height / 2;
+          overLi.classList.add(isAfter ? 'drag-over-bottom' : 'drag-over-top');
+          dragCtx.target = { type: 'list', id: overLi.dataset.id, after: isAfter };
+          return;
+        }
+        if (el.closest('#list')) {
+          dragCtx.target = { type: 'list-end' };
+          return;
+        }
+        const overDay = el.closest('.cal-day');
+        if (overDay && overDay.dataset.iso) {
+          overDay.classList.add('drop-target');
+          dragCtx.target = { type: 'calendar', iso: overDay.dataset.iso };
+          return;
+        }
+        dragCtx.target = null;
+      }
+
+      function dragEnd() {
+        if (!dragCtx) return;
+        const target = dragCtx.target;
+        dragCtx.ghost.remove();
         li.classList.remove('dragging');
         clearDragIndicators();
+        handle.removeEventListener('pointermove', dragMove);
+        handle.removeEventListener('pointerup', dragEnd);
+        handle.removeEventListener('pointercancel', dragEnd);
+        dragCtx = null;
+        if (!target) return;
+        if (target.type === 'list') reorderTasks(task.id, target.id, target.after);
+        else if (target.type === 'list-end') moveTaskToEnd(task.id);
+        else if (target.type === 'calendar') setDue(task.id, target.iso);
+      }
+
+      handle.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        const ghost = document.createElement('div');
+        ghost.className = 'drag-ghost';
+        ghost.textContent = task.text;
+        document.body.appendChild(ghost);
+        ghost.style.left = (e.clientX + 14) + 'px';
+        ghost.style.top = (e.clientY + 14) + 'px';
+        dragCtx = { ghost, target: null };
+        li.classList.add('dragging');
+        try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+        handle.addEventListener('pointermove', dragMove);
+        handle.addEventListener('pointerup', dragEnd);
+        handle.addEventListener('pointercancel', dragEnd);
       });
 
       const box = document.createElement('div');
@@ -1513,8 +1573,11 @@
   }
 
   function clearDragIndicators() {
-    listEl.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+    document.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
       el.classList.remove('drag-over-top', 'drag-over-bottom');
+    });
+    document.querySelectorAll('.cal-day.drop-target').forEach(el => {
+      el.classList.remove('drop-target');
     });
   }
 
@@ -1542,30 +1605,6 @@
     save();
   }
 
-  listEl.addEventListener('dragover', (e) => {
-    e.preventDefault();
-    const li = e.target.closest('li');
-    clearDragIndicators();
-    if (!li) return;
-    const rect = li.getBoundingClientRect();
-    const isAfter = (e.clientY - rect.top) > rect.height / 2;
-    li.classList.add(isAfter ? 'drag-over-bottom' : 'drag-over-top');
-  });
-
-  listEl.addEventListener('drop', (e) => {
-    e.preventDefault();
-    const draggedId = e.dataTransfer.getData('text/plain');
-    const li = e.target.closest('li');
-    clearDragIndicators();
-    if (!draggedId) return;
-    if (!li) {
-      moveTaskToEnd(draggedId);
-      return;
-    }
-    const rect = li.getBoundingClientRect();
-    const isAfter = (e.clientY - rect.top) > rect.height / 2;
-    reorderTasks(draggedId, li.dataset.id, isAfter);
-  });
   function setHighlight(id, color) {
     const t = tasks.find(t => t.id === id);
     if (t) t.highlight = color;

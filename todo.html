@@ -16,6 +16,15 @@
     --room: #DDD5C0;
   }
 
+  html.dark {
+    --rule: rgba(236, 231, 218, 0.14);
+    --margin-rule: #E08B82;
+    --ink: #ECE7DA;
+    --ink-faded: #948E82;
+    --accent: #6FB3A2;
+    --accent-soft: rgba(111, 179, 162, 0.2);
+  }
+
   * { box-sizing: border-box; }
 
   html, body {
@@ -37,7 +46,7 @@
   .sheet {
     position: relative;
     width: 100%;
-    max-width: 560px;
+    max-width: 760px;
     background: var(--paper);
     box-shadow: 0 1px 0 var(--paper-edge), 0 18px 40px rgba(40, 30, 10, 0.18);
     padding: 44px 34px 34px 68px;
@@ -80,6 +89,77 @@
   .theme-label {
     font-size: 11px;
     color: var(--ink-faded);
+  }
+
+  .appearance-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+  }
+
+  .mode-btn {
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 11px;
+    color: var(--ink-faded);
+    cursor: pointer;
+    padding: 0 0 2px 0;
+    border-bottom: 2px solid transparent;
+  }
+
+  .mode-btn.active {
+    color: var(--ink);
+    border-bottom-color: var(--accent);
+  }
+
+  .undo-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 28px;
+    transform: translateX(-50%);
+    display: none;
+    align-items: center;
+    gap: 16px;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: inherit;
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 6px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+    z-index: 1200;
+  }
+
+  .undo-bar button {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .confetti-piece {
+    position: fixed;
+    top: -12px;
+    width: 8px;
+    height: 14px;
+    opacity: 0.9;
+    z-index: 1300;
+    pointer-events: none;
+    border-radius: 2px;
+    animation: confetti-fall linear forwards;
+  }
+
+  @keyframes confetti-fall {
+    to {
+      transform: translateY(110vh) rotate(720deg);
+      opacity: 0.3;
+    }
   }
 
   .swatch {
@@ -393,6 +473,17 @@
     border-radius: 2px;
   }
 
+  .course-meta {
+    flex: none;
+    font-size: 11px;
+    color: var(--ink-faded);
+    margin-top: 13px;
+    max-width: 160px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .new-row {
     display: flex;
     align-items: center;
@@ -679,6 +770,42 @@
     cursor: pointer;
   }
 
+  .import-panel {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .import-hint {
+    font-size: 11px;
+    color: var(--ink-faded);
+    margin-bottom: 8px;
+  }
+
+  #import-text {
+    width: 100%;
+    resize: vertical;
+    border: 1px solid var(--rule);
+    background: transparent;
+    font-family: "Courier New", monospace;
+    font-size: 12px;
+    color: var(--ink);
+    padding: 8px;
+    border-radius: 4px;
+    outline: none;
+  }
+
+  #import-btn {
+    margin-top: 8px;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
   footer button {
     background: none;
     border: none;
@@ -710,6 +837,11 @@
       <div class="theme-row" id="theme-row">
         <span class="theme-label">page:</span>
       </div>
+      <div class="appearance-row" id="appearance-row">
+        <span class="theme-label">mode:</span>
+        <button id="mode-light" class="mode-btn active">light</button>
+        <button id="mode-dark" class="mode-btn">dark</button>
+      </div>
       <div class="legend-row" id="legend-row"></div>
       <div class="notify-row">
         <label><input type="checkbox" id="notif-toggle"> notify me when tasks are due</label>
@@ -735,6 +867,7 @@
         <button id="sort-due">sort by due date</button>
         <button id="clear-done">clear completed</button>
         <button id="toggle-calendar">calendar</button>
+        <button id="toggle-import">import</button>
       </div>
     </footer>
 
@@ -758,6 +891,17 @@
         <button id="event-add">add</button>
       </div>
     </div>
+
+    <div class="import-panel" id="import-panel" style="display:none;">
+      <div class="import-hint">One task per line: Course | Title | Due date | Weight (course and weight are optional)</div>
+      <textarea id="import-text" rows="6" placeholder="ENGG 130 | Assignment 1 | 2026-09-13 | 1%"></textarea>
+      <button id="import-btn">Import tasks</button>
+    </div>
+  </div>
+
+  <div class="undo-bar" id="undo-bar">
+    <span id="undo-message"></span>
+    <button id="undo-btn">Undo</button>
   </div>
 
 <script>
@@ -778,6 +922,10 @@
   const notifToggle = document.getElementById('notif-toggle');
   const calendarPanel = document.getElementById('calendar');
   const toggleCalBtn = document.getElementById('toggle-calendar');
+  const toggleImportBtn = document.getElementById('toggle-import');
+  const importPanel = document.getElementById('import-panel');
+  const importTextEl = document.getElementById('import-text');
+  const importBtn = document.getElementById('import-btn');
   const calTitle = document.getElementById('cal-title');
   const calGrid = document.getElementById('cal-grid');
   const calPrevBtn = document.getElementById('cal-prev');
@@ -791,6 +939,11 @@
   const emptyNote = document.getElementById('empty-note');
   const dateEl = document.getElementById('date');
   const themeRow = document.getElementById('theme-row');
+  const modeLightBtn = document.getElementById('mode-light');
+  const modeDarkBtn = document.getElementById('mode-dark');
+  const undoBar = document.getElementById('undo-bar');
+  const undoMessageEl = document.getElementById('undo-message');
+  const undoBtn = document.getElementById('undo-btn');
 
   const PAPER_PRESETS = ['#F4EFE2', '#EAF2E7', '#F3E6EC', '#E6EEF5', '#F0E9F5'];
   const HIGHLIGHT_COLORS = ['#F5E17E', '#F6A9C6', '#A9D9BB', '#A6CDEE'];
@@ -807,6 +960,7 @@
   }
 
   function applyPaper(hex) {
+    lastLightPaper = hex;
     document.documentElement.style.setProperty('--paper', hex);
     document.documentElement.style.setProperty('--paper-edge', shade(hex, -18));
     document.documentElement.style.setProperty('--room', shade(hex, -38));
@@ -853,6 +1007,40 @@
     } catch (e) {}
     applyPaper(hex);
   }
+
+  const DARK_KEY = 'todo:dark';
+  let lastLightPaper = PAPER_PRESETS[0];
+  let isDark = false;
+
+  async function setDarkMode(dark, persist) {
+    isDark = dark;
+    document.documentElement.classList.toggle('dark', dark);
+    modeLightBtn.classList.toggle('active', !dark);
+    modeDarkBtn.classList.toggle('active', dark);
+    themeRow.style.display = dark ? 'none' : 'flex';
+    if (dark) {
+      document.documentElement.style.setProperty('--paper', '#242320');
+      document.documentElement.style.setProperty('--paper-edge', '#1B1A18');
+      document.documentElement.style.setProperty('--room', '#0F0E0D');
+    } else {
+      applyPaper(lastLightPaper);
+    }
+    if (persist) {
+      try { await window.storage.set(DARK_KEY, dark ? 'on' : 'off', false); } catch (e) {}
+    }
+  }
+
+  async function loadDarkPref() {
+    let dark = false;
+    try {
+      const result = await window.storage.get(DARK_KEY, false);
+      dark = result && result.value === 'on';
+    } catch (e) {}
+    setDarkMode(dark, false);
+  }
+
+  modeLightBtn.addEventListener('click', () => setDarkMode(false, true));
+  modeDarkBtn.addEventListener('click', () => setDarkMode(true, true));
 
   let legend = {};
 
@@ -1027,9 +1215,16 @@
   }
 
   function removeEvent(id) {
-    events = events.filter(e => e.id !== id);
+    const index = events.findIndex(e => e.id === id);
+    if (index === -1) return;
+    const [removed] = events.splice(index, 1);
     saveEvents();
     renderCalendar();
+    showUndo('Event removed', () => {
+      events.splice(index, 0, removed);
+      saveEvents();
+      renderCalendar();
+    });
   }
 
   function toIso(y, m, d) {
@@ -1325,13 +1520,18 @@
 
       const text = document.createElement('div');
       text.className = 'text';
-      if (task.highlight) {
-        const mark = document.createElement('mark');
-        mark.style.setProperty('--hl', task.highlight);
-        mark.textContent = task.text;
-        text.appendChild(mark);
-      } else {
-        text.textContent = task.text;
+      const mainSpan = document.createElement(task.highlight ? 'mark' : 'span');
+      if (task.highlight) mainSpan.style.setProperty('--hl', task.highlight);
+      mainSpan.textContent = task.text;
+      text.appendChild(mainSpan);
+      const metaParts = [task.course, task.weight].filter(Boolean);
+      text.title = task.text + (metaParts.length ? ' — ' + metaParts.join(' · ') : '');
+
+      const courseMeta = document.createElement('div');
+      courseMeta.className = 'course-meta';
+      if (metaParts.length) {
+        courseMeta.textContent = metaParts.join(' · ');
+        courseMeta.title = metaParts.join(' · ');
       }
 
       const highlights = document.createElement('div');
@@ -1369,6 +1569,7 @@
       li.appendChild(handle);
       li.appendChild(box);
       li.appendChild(text);
+      li.appendChild(courseMeta);
       li.appendChild(dueHolder);
       li.appendChild(highlights);
       li.appendChild(pinBtn);
@@ -1382,6 +1583,11 @@
       : '';
     emptyNote.style.display = tasks.length ? 'none' : 'block';
     renderCalendar();
+
+    if (tasks.length > 0 && remaining === 0 && prevRemaining !== null && prevRemaining > 0) {
+      celebrate();
+    }
+    prevRemaining = remaining;
   }
 
   function addTask(text) {
@@ -1394,6 +1600,68 @@
     save();
   }
 
+  function parseDateFlexible(str) {
+    str = (str || '').trim();
+    if (!str) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return null;
+    return toIso(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function importTasks(text) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const addedIds = [];
+    let count = 0;
+    lines.forEach(line => {
+      const parts = line.split('|').map(p => p.trim());
+      let course = '', title = '', dueRaw = '', weight = '';
+      if (parts.length >= 4) {
+        [course, title, dueRaw, weight] = parts;
+      } else if (parts.length === 3) {
+        [title, dueRaw, weight] = parts;
+      } else if (parts.length === 2) {
+        [title, dueRaw] = parts;
+      } else {
+        title = parts[0] || '';
+      }
+      if (!title) return;
+      const id = Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '-' + count;
+      tasks.push({
+        id,
+        text: title,
+        done: false,
+        due: parseDateFlexible(dueRaw),
+        course: course || undefined,
+        weight: weight || undefined
+      });
+      addedIds.push(id);
+      count++;
+    });
+    if (count) {
+      render();
+      save();
+    }
+    return addedIds;
+  }
+
+  toggleImportBtn.addEventListener('click', () => {
+    const showing = importPanel.style.display !== 'none';
+    importPanel.style.display = showing ? 'none' : 'block';
+  });
+
+  importBtn.addEventListener('click', () => {
+    const addedIds = importTasks(importTextEl.value);
+    if (addedIds.length) {
+      importTextEl.value = '';
+      showUndo(addedIds.length === 1 ? '1 task imported' : addedIds.length + ' tasks imported', () => {
+        tasks = tasks.filter(t => !addedIds.includes(t.id));
+        render();
+        save();
+      });
+    }
+  });
+
   function toggleTask(id) {
     const t = tasks.find(t => t.id === id);
     if (t) t.done = !t.done;
@@ -1402,10 +1670,55 @@
   }
 
   function removeTask(id) {
-    tasks = tasks.filter(t => t.id !== id);
+    const index = tasks.findIndex(t => t.id === id);
+    if (index === -1) return;
+    const [removed] = tasks.splice(index, 1);
     render();
     save();
+    showUndo('Task deleted', () => {
+      tasks.splice(index, 0, removed);
+      render();
+      save();
+    });
   }
+
+  let undoTimeout = null;
+  let lastUndo = null;
+
+  function showUndo(message, restoreFn) {
+    lastUndo = { restore: restoreFn };
+    undoMessageEl.textContent = message;
+    undoBar.style.display = 'flex';
+    clearTimeout(undoTimeout);
+    undoTimeout = setTimeout(hideUndo, 5000);
+  }
+
+  function hideUndo() {
+    undoBar.style.display = 'none';
+    lastUndo = null;
+  }
+
+  undoBtn.addEventListener('click', () => {
+    if (lastUndo) lastUndo.restore();
+    hideUndo();
+  });
+
+  function celebrate() {
+    const colors = HIGHLIGHT_COLORS.concat(['#3F6E63', '#B5564E']);
+    const count = 70;
+    for (let i = 0; i < count; i++) {
+      const piece = document.createElement('div');
+      piece.className = 'confetti-piece';
+      piece.style.left = Math.random() * 100 + 'vw';
+      piece.style.background = colors[Math.floor(Math.random() * colors.length)];
+      piece.style.animationDelay = (Math.random() * 0.4) + 's';
+      piece.style.animationDuration = (2.2 + Math.random() * 1.2) + 's';
+      document.body.appendChild(piece);
+      setTimeout(() => piece.remove(), 4200);
+    }
+  }
+
+  let prevRemaining = null;
 
   function todayISO() {
     return new Date().toISOString().slice(0, 10);
@@ -1535,15 +1848,22 @@
   });
 
   clearBtn.addEventListener('click', () => {
+    const removed = tasks.filter(t => t.done);
+    if (!removed.length) return;
     tasks = tasks.filter(t => !t.done);
     render();
     save();
+    showUndo(removed.length === 1 ? '1 task cleared' : removed.length + ' tasks cleared', () => {
+      tasks = tasks.concat(removed);
+      render();
+      save();
+    });
   });
 
   sortBtn.addEventListener('click', sortByDue);
   sortColorBtn.addEventListener('click', sortByColor);
 
-  loadTheme();
+  loadTheme().then(loadDarkPref);
   loadLegend();
   loadNotifyPref();
   loadEvents();

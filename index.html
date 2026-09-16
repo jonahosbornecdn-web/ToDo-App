@@ -51,7 +51,7 @@
   .sheet {
     position: relative;
     width: 100%;
-    max-width: 560px;
+    max-width: 760px;
     background: var(--paper);
     box-shadow: 0 1px 0 var(--paper-edge), 0 18px 40px rgba(40, 30, 10, 0.18);
     padding: 44px 34px 34px 68px;
@@ -478,6 +478,17 @@
     border-radius: 2px;
   }
 
+  .course-meta {
+    flex: none;
+    font-size: 11px;
+    color: var(--ink-faded);
+    margin-top: 13px;
+    max-width: 160px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .new-row {
     display: flex;
     align-items: center;
@@ -764,6 +775,42 @@
     cursor: pointer;
   }
 
+  .import-panel {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--rule);
+  }
+
+  .import-hint {
+    font-size: 11px;
+    color: var(--ink-faded);
+    margin-bottom: 8px;
+  }
+
+  #import-text {
+    width: 100%;
+    resize: vertical;
+    border: 1px solid var(--rule);
+    background: transparent;
+    font-family: "Courier New", monospace;
+    font-size: 12px;
+    color: var(--ink);
+    padding: 8px;
+    border-radius: 4px;
+    outline: none;
+  }
+
+  #import-btn {
+    margin-top: 8px;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+  }
+
   footer button {
     background: none;
     border: none;
@@ -825,6 +872,7 @@
         <button id="sort-due">sort by due date</button>
         <button id="clear-done">clear completed</button>
         <button id="toggle-calendar">calendar</button>
+        <button id="toggle-import">import</button>
       </div>
     </footer>
 
@@ -847,6 +895,12 @@
         <input type="text" id="event-text" placeholder="Add an event…" maxlength="60">
         <button id="event-add">add</button>
       </div>
+    </div>
+
+    <div class="import-panel" id="import-panel" style="display:none;">
+      <div class="import-hint">One task per line: Course | Title | Due date | Weight (course and weight are optional)</div>
+      <textarea id="import-text" rows="6" placeholder="ENGG 130 | Assignment 1 | 2026-09-13 | 1%"></textarea>
+      <button id="import-btn">Import tasks</button>
     </div>
   </div>
 
@@ -953,6 +1007,10 @@
   const notifToggle = document.getElementById('notif-toggle');
   const calendarPanel = document.getElementById('calendar');
   const toggleCalBtn = document.getElementById('toggle-calendar');
+  const toggleImportBtn = document.getElementById('toggle-import');
+  const importPanel = document.getElementById('import-panel');
+  const importTextEl = document.getElementById('import-text');
+  const importBtn = document.getElementById('import-btn');
   const calTitle = document.getElementById('cal-title');
   const calGrid = document.getElementById('cal-grid');
   const calPrevBtn = document.getElementById('cal-prev');
@@ -1547,13 +1605,18 @@
 
       const text = document.createElement('div');
       text.className = 'text';
-      if (task.highlight) {
-        const mark = document.createElement('mark');
-        mark.style.setProperty('--hl', task.highlight);
-        mark.textContent = task.text;
-        text.appendChild(mark);
-      } else {
-        text.textContent = task.text;
+      const mainSpan = document.createElement(task.highlight ? 'mark' : 'span');
+      if (task.highlight) mainSpan.style.setProperty('--hl', task.highlight);
+      mainSpan.textContent = task.text;
+      text.appendChild(mainSpan);
+      const metaParts = [task.course, task.weight].filter(Boolean);
+      text.title = task.text + (metaParts.length ? ' — ' + metaParts.join(' · ') : '');
+
+      const courseMeta = document.createElement('div');
+      courseMeta.className = 'course-meta';
+      if (metaParts.length) {
+        courseMeta.textContent = metaParts.join(' · ');
+        courseMeta.title = metaParts.join(' · ');
       }
 
       const highlights = document.createElement('div');
@@ -1591,6 +1654,7 @@
       li.appendChild(handle);
       li.appendChild(box);
       li.appendChild(text);
+      li.appendChild(courseMeta);
       li.appendChild(dueHolder);
       li.appendChild(highlights);
       li.appendChild(pinBtn);
@@ -1620,6 +1684,68 @@
     render();
     save();
   }
+
+  function parseDateFlexible(str) {
+    str = (str || '').trim();
+    if (!str) return null;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+    const d = new Date(str);
+    if (isNaN(d.getTime())) return null;
+    return toIso(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+
+  function importTasks(text) {
+    const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+    const addedIds = [];
+    let count = 0;
+    lines.forEach(line => {
+      const parts = line.split('|').map(p => p.trim());
+      let course = '', title = '', dueRaw = '', weight = '';
+      if (parts.length >= 4) {
+        [course, title, dueRaw, weight] = parts;
+      } else if (parts.length === 3) {
+        [title, dueRaw, weight] = parts;
+      } else if (parts.length === 2) {
+        [title, dueRaw] = parts;
+      } else {
+        title = parts[0] || '';
+      }
+      if (!title) return;
+      const id = Date.now() + '-' + Math.random().toString(36).slice(2, 7) + '-' + count;
+      tasks.push({
+        id,
+        text: title,
+        done: false,
+        due: parseDateFlexible(dueRaw),
+        course: course || undefined,
+        weight: weight || undefined
+      });
+      addedIds.push(id);
+      count++;
+    });
+    if (count) {
+      render();
+      save();
+    }
+    return addedIds;
+  }
+
+  toggleImportBtn.addEventListener('click', () => {
+    const showing = importPanel.style.display !== 'none';
+    importPanel.style.display = showing ? 'none' : 'block';
+  });
+
+  importBtn.addEventListener('click', () => {
+    const addedIds = importTasks(importTextEl.value);
+    if (addedIds.length) {
+      importTextEl.value = '';
+      showUndo(addedIds.length === 1 ? '1 task imported' : addedIds.length + ' tasks imported', () => {
+        tasks = tasks.filter(t => !addedIds.includes(t.id));
+        render();
+        save();
+      });
+    }
+  });
 
   function toggleTask(id) {
     const t = tasks.find(t => t.id === id);

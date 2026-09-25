@@ -1,0 +1,27 @@
+name: Due task reminders
+
+# Once a day (~7:00 AM America/Edmonton), check the shared To-do list and send
+# a Web Push notification for tasks that are overdue, due today, or due
+# tomorrow. Free: Web Push has no per-message cost; this cron is the scheduler.
+on:
+  schedule:
+    - cron: '0 13 * * *'
+  workflow_dispatch: # allow manual test runs from the Actions tab
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: notify
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: Send due-date reminders
+        run: node send-reminders.js
+        env:
+          VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
+          VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}

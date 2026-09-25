@@ -1212,10 +1212,12 @@
       }
       await setNotifyPref(true);
       startNotifyLoop();
+      subscribePush().catch(() => {});
       checkDueNotifications();
     } else {
       await setNotifyPref(false);
       stopNotifyLoop();
+      unsubscribePush().catch(() => {});
     }
   });
 
@@ -1265,6 +1267,67 @@
       }
     } catch (e) {}
     try { new Notification(title, { body: body }); } catch (e) {}
+  }
+
+  // ---- Phone push notifications (Web Push) ----
+  // Works even when the site is closed. Needs the site installed to the
+  // home screen on iPhone. The daily reminder job (.github/workflows)
+  // sends pushes to every subscription stored under PUSH_SUBS_KEY.
+  const VAPID_PUBLIC_KEY = 'BDRv_mGOw2gYzHgHYj65rl5suCfeotXhC8SNKFmmsC6mf9rP9ru3_gzoDHj9vGh-k-PMfw9hnZmM4hM4qwZK6so';
+  const PUSH_SUBS_KEY = 'todo:push-subscriptions';
+
+  function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+    const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+    const raw = atob(base64);
+    const out = new Uint8Array(raw.length);
+    for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+    return out;
+  }
+
+  async function loadPushSubscriptions() {
+    try {
+      const result = await window.storage.get(PUSH_SUBS_KEY, false);
+      return result && result.value ? JSON.parse(result.value) : [];
+    } catch (e) { return []; }
+  }
+
+  async function savePushSubscriptions(subs) {
+    try { await window.storage.set(PUSH_SUBS_KEY, JSON.stringify(subs), false); } catch (e) {}
+  }
+
+  async function subscribePush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+      });
+    }
+    const subJson = sub.toJSON();
+    const subs = await loadPushSubscriptions();
+    if (!subs.some(s => s.endpoint === subJson.endpoint)) {
+      subs.push(subJson);
+      await savePushSubscriptions(subs);
+    }
+  }
+
+  async function unsubscribePush() {
+    try {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      const reg = await navigator.serviceWorker.getRegistration();
+      if (!reg) return;
+      const sub = await reg.pushManager.getSubscription();
+      if (sub) {
+        const endpoint = sub.endpoint;
+        await sub.unsubscribe();
+        const subs = (await loadPushSubscriptions()).filter(s => s.endpoint !== endpoint);
+        await savePushSubscriptions(subs);
+      }
+    } catch (e) {}
   }
 
   let events = [];

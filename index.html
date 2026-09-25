@@ -1257,7 +1257,8 @@
       const result = await window.storage.get(notifiedKey, false);
       notified = result && result.value ? JSON.parse(result.value) : [];
     } catch (e) {}
-    const dueTasks = tasks.filter(t => !t.done && t.due && t.due <= today && !notified.includes(t.id));
+    const notifiedSet = new Set(notified);
+    const dueTasks = tasks.filter(t => !t.done && t.due && t.due <= today && !notifiedSet.has(t.id));
     if (!dueTasks.length) return;
     notified = notified.concat(dueTasks.map(t => t.id));
     try { await window.storage.set(notifiedKey, JSON.stringify(notified), false); } catch (e) {}
@@ -1360,7 +1361,6 @@
   }
 
   let events = [];
-  const today = new Date();
   let calAnchor = new Date();
   let calMode = 'month';
 
@@ -1410,19 +1410,19 @@
     return y + '-' + mm + '-' + dd;
   }
 
-  function buildDayCell(iso, dayNum, otherMonth) {
+  function buildDayCell(iso, dayNum, otherMonth, todayStr, tasksByDue, eventsByDate) {
     const cell = document.createElement('div');
     cell.className = 'cal-day';
     if (otherMonth) cell.classList.add('other-month');
-    if (iso === todayISO()) cell.classList.add('today');
+    if (iso === todayStr) cell.classList.add('today');
 
     const num = document.createElement('div');
     num.className = 'day-num';
     num.textContent = dayNum;
     cell.appendChild(num);
 
-    const dayTasks = tasks.filter(t => t.due === iso);
-    dayTasks.forEach(t => {
+    const dayTasks = tasksByDue.get(iso);
+    if (dayTasks) dayTasks.forEach(t => {
       const chip = document.createElement('div');
       chip.className = 'cal-task' + (t.done ? ' done' : '');
       if (t.highlight) chip.style.background = t.highlight;
@@ -1436,8 +1436,8 @@
       cell.appendChild(chip);
     });
 
-    const dayEvents = events.filter(e => e.date === iso);
-    dayEvents.forEach(ev => {
+    const dayEvents = eventsByDate.get(iso);
+    if (dayEvents) dayEvents.forEach(ev => {
       const chip = document.createElement('div');
       chip.className = 'cal-event';
       const label = document.createElement('span');
@@ -1467,7 +1467,24 @@
 
   function renderCalendar() {
     if (!calGrid) return;
+    if (calendarPanel.style.display === 'none') return; // skip work while hidden
+    const todayStr = todayISO();
+    // Index tasks/events by date once instead of filtering per day cell.
+    const tasksByDue = new Map();
+    for (const t of tasks) {
+      if (!t.due) continue;
+      let arr = tasksByDue.get(t.due);
+      if (!arr) { arr = []; tasksByDue.set(t.due, arr); }
+      arr.push(t);
+    }
+    const eventsByDate = new Map();
+    for (const ev of events) {
+      let arr = eventsByDate.get(ev.date);
+      if (!arr) { arr = []; eventsByDate.set(ev.date, arr); }
+      arr.push(ev);
+    }
     calGrid.innerHTML = '';
+    const frag = document.createDocumentFragment();
 
     if (calMode === 'week') {
       const start = new Date(calAnchor);
@@ -1482,8 +1499,9 @@
         const d = new Date(start);
         d.setDate(start.getDate() + i);
         const iso = toIso(d.getFullYear(), d.getMonth(), d.getDate());
-        calGrid.appendChild(buildDayCell(iso, d.getDate(), d.getMonth() !== calAnchor.getMonth()));
+        frag.appendChild(buildDayCell(iso, d.getDate(), d.getMonth() !== calAnchor.getMonth(), todayStr, tasksByDue, eventsByDate));
       }
+      calGrid.appendChild(frag);
       return;
     }
 
@@ -1496,7 +1514,7 @@
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const daysInPrevMonth = new Date(year, month, 0).getDate();
 
-    const totalCells = 42;
+    const totalCells = Math.ceil((startWeekday + daysInMonth) / 7) * 7;
     for (let i = 0; i < totalCells; i++) {
       let cellDay, cellMonth, cellYear, otherMonth;
       if (i < startWeekday) {
@@ -1519,8 +1537,9 @@
       if (normMonth < 0) { normMonth = 11; normYear -= 1; }
       if (normMonth > 11) { normMonth = 0; normYear += 1; }
       const iso = toIso(normYear, normMonth, cellDay);
-      calGrid.appendChild(buildDayCell(iso, cellDay, otherMonth));
+      frag.appendChild(buildDayCell(iso, cellDay, otherMonth, todayStr, tasksByDue, eventsByDate));
     }
+    calGrid.appendChild(frag);
   }
 
   toggleCalBtn.addEventListener('click', () => {
@@ -1617,7 +1636,9 @@
   const pinSVG = '<svg viewBox="0 0 16 16"><circle cx="8" cy="5" r="3" fill="currentColor"/><line x1="8" y1="8" x2="8" y2="15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
   function render() {
+    const todayStr = todayISO();
     listEl.innerHTML = '';
+    const frag = document.createDocumentFragment();
     getDisplayOrder().forEach(task => {
       const li = document.createElement('li');
       li.className = [task.done ? 'done' : '', task.pinned ? 'pinned' : ''].filter(Boolean).join(' ');
@@ -1628,52 +1649,6 @@
       handle.title = 'Drag to reorder or onto the calendar';
       for (let i = 0; i < 6; i++) handle.appendChild(document.createElement('span'));
 
-      let dragCtx = null;
-
-      function dragMove(e) {
-        if (!dragCtx) return;
-        dragCtx.ghost.style.left = (e.clientX + 14) + 'px';
-        dragCtx.ghost.style.top = (e.clientY + 14) + 'px';
-        clearDragIndicators();
-        const el = document.elementFromPoint(e.clientX, e.clientY);
-        if (!el) { dragCtx.target = null; return; }
-        const overLi = el.closest('#list li');
-        if (overLi) {
-          const rect = overLi.getBoundingClientRect();
-          const isAfter = (e.clientY - rect.top) > rect.height / 2;
-          overLi.classList.add(isAfter ? 'drag-over-bottom' : 'drag-over-top');
-          dragCtx.target = { type: 'list', id: overLi.dataset.id, after: isAfter };
-          return;
-        }
-        if (el.closest('#list')) {
-          dragCtx.target = { type: 'list-end' };
-          return;
-        }
-        const overDay = el.closest('.cal-day');
-        if (overDay && overDay.dataset.iso) {
-          overDay.classList.add('drop-target');
-          dragCtx.target = { type: 'calendar', iso: overDay.dataset.iso };
-          return;
-        }
-        dragCtx.target = null;
-      }
-
-      function dragEnd() {
-        if (!dragCtx) return;
-        const target = dragCtx.target;
-        dragCtx.ghost.remove();
-        li.classList.remove('dragging');
-        clearDragIndicators();
-        handle.removeEventListener('pointermove', dragMove);
-        handle.removeEventListener('pointerup', dragEnd);
-        handle.removeEventListener('pointercancel', dragEnd);
-        dragCtx = null;
-        if (!target) return;
-        if (target.type === 'list') reorderTasks(task.id, target.id, target.after);
-        else if (target.type === 'list-end') moveTaskToEnd(task.id);
-        else if (target.type === 'calendar') setDue(task.id, target.iso);
-      }
-
       handle.addEventListener('pointerdown', (e) => {
         e.preventDefault();
         const ghost = document.createElement('div');
@@ -1682,12 +1657,12 @@
         document.body.appendChild(ghost);
         ghost.style.left = (e.clientX + 14) + 'px';
         ghost.style.top = (e.clientY + 14) + 'px';
-        dragCtx = { ghost, target: null };
+        handle._dragCtx = { ghost, target: null, taskId: task.id, li };
         li.classList.add('dragging');
         try { handle.setPointerCapture(e.pointerId); } catch (err) {}
-        handle.addEventListener('pointermove', dragMove);
-        handle.addEventListener('pointerup', dragEnd);
-        handle.addEventListener('pointercancel', dragEnd);
+        handle.addEventListener('pointermove', onDragMove);
+        handle.addEventListener('pointerup', onDragEnd);
+        handle.addEventListener('pointercancel', onDragEnd);
       });
 
       const box = document.createElement('div');
@@ -1729,7 +1704,7 @@
 
       const dueHolder = document.createElement('div');
       dueHolder.style.flex = 'none';
-      renderDue(dueHolder, task);
+      renderDue(dueHolder, task, todayStr);
 
       const pinBtn = document.createElement('button');
       pinBtn.className = 'pin-btn';
@@ -1751,8 +1726,9 @@
       li.appendChild(highlights);
       li.appendChild(pinBtn);
       li.appendChild(remove);
-      listEl.appendChild(li);
+      frag.appendChild(li);
     });
+    listEl.appendChild(frag);
 
     const remaining = tasks.filter(t => !t.done).length;
     counterEl.textContent = tasks.length
@@ -1832,7 +1808,8 @@
     if (addedIds.length) {
       importTextEl.value = '';
       showUndo(addedIds.length === 1 ? '1 task imported' : addedIds.length + ' tasks imported', () => {
-        tasks = tasks.filter(t => !addedIds.includes(t.id));
+        const addedSet = new Set(addedIds);
+        tasks = tasks.filter(t => !addedSet.has(t.id));
         render();
         save();
       });
@@ -1901,17 +1878,25 @@
     return new Date().toISOString().slice(0, 10);
   }
 
+  const formatDueCache = new Map();
+
   function formatDue(iso) {
-    const [y, m, d] = iso.split('-').map(Number);
-    const date = new Date(y, m - 1, d);
-    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    let out = formatDueCache.get(iso);
+    if (out === undefined) {
+      const [y, m, d] = iso.split('-').map(Number);
+      const date = new Date(y, m - 1, d);
+      out = date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      formatDueCache.set(iso, out);
+    }
+    return out;
   }
 
-  function renderDue(holder, task) {
+  function renderDue(holder, task, todayStr) {
+    if (todayStr === undefined) todayStr = todayISO();
     holder.innerHTML = '';
     if (task.due) {
       const chip = document.createElement('span');
-      chip.className = 'due' + (!task.done && task.due < todayISO() ? ' overdue' : '');
+      chip.className = 'due' + (!task.done && task.due < todayStr ? ' overdue' : '');
       chip.textContent = formatDue(task.due);
       chip.title = 'Click to change due date';
       chip.addEventListener('click', () => showDueInput(holder, task));
@@ -1948,30 +1933,26 @@
     save();
   }
 
+  function compareByDue(a, b) {
+    if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
+    if (a.due && !b.due) return -1;
+    if (!a.due && b.due) return 1;
+    return 0;
+  }
+
   function sortByDue() {
-    tasks.sort((a, b) => {
-      if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
-      if (a.due && !b.due) return -1;
-      if (!a.due && b.due) return 1;
-      return 0;
-    });
+    tasks.sort(compareByDue);
     render();
     save();
   }
 
   function sortByColor() {
     const order = [...HIGHLIGHT_COLORS, null];
-    const byDue = (a, b) => {
-      if (a.due && b.due) return a.due < b.due ? -1 : a.due > b.due ? 1 : 0;
-      if (a.due && !b.due) return -1;
-      if (!a.due && b.due) return 1;
-      return 0;
-    };
     tasks.sort((a, b) => {
       const ai = order.indexOf(a.highlight || null);
       const bi = order.indexOf(b.highlight || null);
       if (ai !== bi) return ai - bi;
-      return byDue(a, b);
+      return compareByDue(a, b);
     });
     render();
     save();
@@ -1984,6 +1965,55 @@
     document.querySelectorAll('.cal-day.drop-target').forEach(el => {
       el.classList.remove('drop-target');
     });
+  }
+
+  // Shared drag handlers, hoisted out of render() so they aren't recreated
+  // for every task on every render. Per-drag state lives on handle._dragCtx.
+  function onDragMove(e) {
+    const dragCtx = e.currentTarget._dragCtx;
+    if (!dragCtx) return;
+    dragCtx.ghost.style.left = (e.clientX + 14) + 'px';
+    dragCtx.ghost.style.top = (e.clientY + 14) + 'px';
+    clearDragIndicators();
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el) { dragCtx.target = null; return; }
+    const overLi = el.closest('#list li');
+    if (overLi) {
+      const rect = overLi.getBoundingClientRect();
+      const isAfter = (e.clientY - rect.top) > rect.height / 2;
+      overLi.classList.add(isAfter ? 'drag-over-bottom' : 'drag-over-top');
+      dragCtx.target = { type: 'list', id: overLi.dataset.id, after: isAfter };
+      return;
+    }
+    if (el.closest('#list')) {
+      dragCtx.target = { type: 'list-end' };
+      return;
+    }
+    const overDay = el.closest('.cal-day');
+    if (overDay && overDay.dataset.iso) {
+      overDay.classList.add('drop-target');
+      dragCtx.target = { type: 'calendar', iso: overDay.dataset.iso };
+      return;
+    }
+    dragCtx.target = null;
+  }
+
+  function onDragEnd(e) {
+    const handle = e.currentTarget;
+    const dragCtx = handle._dragCtx;
+    handle._dragCtx = null;
+    if (!dragCtx) return;
+    const target = dragCtx.target;
+    dragCtx.ghost.remove();
+    dragCtx.li.classList.remove('dragging');
+    clearDragIndicators();
+    handle.removeEventListener('pointermove', onDragMove);
+    handle.removeEventListener('pointerup', onDragEnd);
+    handle.removeEventListener('pointercancel', onDragEnd);
+    if (!target) return;
+    if (target.type === 'list') reorderTasks(dragCtx.taskId, target.id, target.after);
+    else if (target.type === 'list-end') moveTaskToEnd(dragCtx.taskId);
+    else if (target.type === 'calendar') setDue(dragCtx.taskId, target.iso);
   }
 
   function reorderTasks(draggedId, targetId, after) {

@@ -103,9 +103,13 @@ async function main() {
   const alreadyRaw = strVal(fields, notifiedKey);
   const already = new Set(alreadyRaw ? JSON.parse(alreadyRaw) : []);
 
-  const overdue = tasks.filter(t => !t.done && t.due && t.due < today && !already.has(t.id));
-  const dueToday = tasks.filter(t => !t.done && t.due === today && !already.has(t.id));
-  const dueTomorrow = tasks.filter(t => !t.done && t.due === tomorrow && !already.has(t.id));
+  const overdue = [], dueToday = [], dueTomorrow = [];
+  for (const t of tasks) {
+    if (t.done || !t.due || already.has(t.id)) continue;
+    if (t.due < today) overdue.push(t);
+    else if (t.due === today) dueToday.push(t);
+    else if (t.due === tomorrow) dueTomorrow.push(t);
+  }
   const fresh = [...overdue, ...dueToday, ...dueTomorrow];
 
   if (!fresh.length) {
@@ -131,15 +135,17 @@ async function main() {
 
   const dead = [];
   if (!DRY_RUN) {
-    for (const sub of subs) {
-      try {
-        await webpush.sendNotification(sub, payload);
+    const results = await Promise.allSettled(subs.map(sub => webpush.sendNotification(sub, payload)));
+    results.forEach((r, i) => {
+      const sub = subs[i];
+      if (r.status === 'fulfilled') {
         console.log(`sent -> ${sub.endpoint.slice(0, 60)}...`);
-      } catch (e) {
+      } else {
+        const e = r.reason || {};
         console.error(`send failed (${e.statusCode}): ${sub.endpoint.slice(0, 60)}...`);
         if (e.statusCode === 404 || e.statusCode === 410) dead.push(sub.endpoint);
       }
-    }
+    });
   } else {
     console.log('[dry run] skipping actual push send');
   }

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'todo-notebook-v15';
+const CACHE_NAME = 'todo-notebook-v16';
 const ASSETS = [
   './',
   './index.html',
@@ -24,6 +24,8 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Only cache GET requests; cache.put() rejects for POST/PUT (e.g. Firestore writes).
+  if (event.request.method !== 'GET') return;
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const fetchPromise = fetch(event.request)

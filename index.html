@@ -961,7 +961,7 @@
     <footer>
       <div class="footer-status">
         <span id="counter"></span>
-        <span id="app-version" title="App version">v17</span>
+        <span id="app-version" title="App version">v18</span>
       </div>
       <div class="footer-actions">
         <button id="sort-color">sort by colour</button>
@@ -1117,6 +1117,7 @@
       if (code === 'auth/invalid-email') return 'That email doesn\u2019t look right.';
       if (code === 'auth/operation-not-allowed') return 'Sign-in isn\u2019t enabled yet — try again in a bit.';
       if (code === 'auth/too-many-requests') return 'Too many attempts — wait a minute and try again.';
+      if (code === 'auth/timeout') return 'Sign-in timed out. Check your connection or turn off any content blocker for this site, then try again.';
       return 'Couldn\u2019t sign in. Check your connection and try again.';
     }
 
@@ -1127,8 +1128,9 @@
       goBtn.disabled = true;
       errEl.textContent = '';
       try {
-        if (mode === 'signup') await auth.createUserWithEmailAndPassword(email, password);
-        else await auth.signInWithEmailAndPassword(email, password);
+        const timeout = new Promise((_, rej) => setTimeout(() => rej({ code: 'auth/timeout' }), 20000));
+        if (mode === 'signup') await Promise.race([auth.createUserWithEmailAndPassword(email, password), timeout]);
+        else await Promise.race([auth.signInWithEmailAndPassword(email, password), timeout]);
         // onAuthStateChanged takes it from here.
       } catch (e) {
         errEl.textContent = friendlyError(e);
@@ -1154,7 +1156,14 @@
 
     // Firebase persists the session on this device — after the first
     // sign-in the gate stays hidden and the list opens directly.
+    // If the auth SDK never reports a sign-in state (e.g. its backend
+    // endpoints are blocked), don't leave the user staring at an empty
+    // list forever — show the gate so they can try signing in and see
+    // any error message.
+    let authResolved = false;
+    setTimeout(() => { if (!authResolved) gate.classList.add('show'); }, 5000);
     auth.onAuthStateChanged((user) => {
+      authResolved = true;
       if (user) {
         gate.classList.remove('show');
         if (!snapUnsub) attachUser();

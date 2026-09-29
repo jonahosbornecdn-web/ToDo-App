@@ -837,9 +837,97 @@
     padding: 8px 0 0 27px;
     display: none;
   }
+
+  /* ---- Login gate ---- */
+  #login-gate {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: var(--room);
+    padding: 20px;
+  }
+  #login-gate.show { display: flex; }
+  .login-card {
+    width: 100%;
+    max-width: 340px;
+    background: var(--paper);
+    box-shadow: 0 1px 0 var(--paper-edge), 0 18px 40px rgba(40, 30, 10, 0.18);
+    padding: 34px 30px 28px;
+    text-align: center;
+  }
+  .login-card h1 {
+    font-size: 22px;
+    margin: 0 0 6px;
+  }
+  .login-card p {
+    font-size: 13px;
+    color: var(--ink-faded);
+    margin: 0 0 18px;
+  }
+  .login-card input {
+    width: 100%;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--ink);
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--rule);
+    padding: 8px 2px;
+    margin-bottom: 12px;
+    outline: none;
+    border-radius: 0;
+  }
+  .login-card input:focus { border-bottom-color: var(--accent); }
+  .login-btn {
+    width: 100%;
+    font-family: inherit;
+    font-size: 15px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    padding: 10px;
+    margin-top: 6px;
+    cursor: pointer;
+  }
+  .login-btn:disabled { opacity: 0.6; cursor: wait; }
+  .login-switch {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--ink-faded);
+  }
+  .login-switch button {
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: inherit;
+    font-size: 13px;
+    color: var(--accent);
+    text-decoration: underline;
+    cursor: pointer;
+  }
+  .login-error {
+    min-height: 18px;
+    font-size: 12px;
+    color: #B5564E;
+    margin: 8px 0 0;
+  }
 </style>
 </head>
 <body>
+  <div id="login-gate">
+    <div class="login-card">
+      <h1>To-do</h1>
+      <p id="login-sub">Sign in to open your list.</p>
+      <input type="email" id="login-email" placeholder="Email" autocomplete="username" autocapitalize="none">
+      <input type="password" id="login-password" placeholder="Password" autocomplete="current-password">
+      <button class="login-btn" id="login-go">Sign in</button>
+      <div class="login-switch" id="login-switch-wrap">No account yet? <button id="login-switch" type="button">Create one</button></div>
+      <p class="login-error" id="login-error"></p>
+    </div>
+  </div>
   <div class="sheet">
     <div class="margin-line"></div>
     <header>
@@ -977,18 +1065,106 @@
   try {
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
-    docRef = db.collection('todoApp').doc('shared');
+    const auth = firebase.auth();
+    let snapUnsub = null;
 
-    ready = firebase.auth().signInAnonymously()
-      .then(() => {
-        docRef.onSnapshot((snap) => {
-          if (snap.metadata.hasPendingWrites) return; // ignore our own optimistic write
-          onRemoteChange();
-        });
-      })
-      .catch(() => { docRef = null; });
+    // ---- Login gate ----
+    const gate = document.getElementById('login-gate');
+    const emailEl = document.getElementById('login-email');
+    const passEl = document.getElementById('login-password');
+    const goBtn = document.getElementById('login-go');
+    const switchWrap = document.getElementById('login-switch-wrap');
+    const subEl = document.getElementById('login-sub');
+    const errEl = document.getElementById('login-error');
+    let mode = 'signin'; // or 'signup'
+
+    // Set to false once the owner's account exists — hides the create-account UI.
+    // (New sign-ups are also disabled server-side in the Firebase console.)
+    const ALLOW_SIGNUP = true;
+
+    function bindSwitch() {
+      const btn = document.getElementById('login-switch');
+      if (btn) btn.addEventListener('click', () => {
+        setMode(mode === 'signin' ? 'signup' : 'signin');
+      });
+    }
+
+    function setMode(m) {
+      mode = m;
+      errEl.textContent = '';
+      if (m === 'signup') {
+        subEl.textContent = 'Create your account — one time only.';
+        goBtn.textContent = 'Create account';
+        passEl.setAttribute('autocomplete', 'new-password');
+        switchWrap.innerHTML = 'Already have an account? <button id="login-switch" type="button">Sign in</button>';
+      } else {
+        subEl.textContent = 'Sign in to open your list.';
+        goBtn.textContent = 'Sign in';
+        passEl.setAttribute('autocomplete', 'current-password');
+        switchWrap.innerHTML = 'No account yet? <button id="login-switch" type="button">Create one</button>';
+      }
+      bindSwitch();
+    }
+
+    function friendlyError(e) {
+      const code = (e && e.code) || '';
+      if (code === 'auth/user-not-found' || code === 'auth/wrong-password' || code === 'auth/invalid-credential')
+        return 'Wrong email or password.';
+      if (code === 'auth/email-already-in-use') return 'That email already has an account — sign in instead.';
+      if (code === 'auth/weak-password') return 'Password needs at least 6 characters.';
+      if (code === 'auth/invalid-email') return 'That email doesn\u2019t look right.';
+      if (code === 'auth/operation-not-allowed') return 'Sign-in isn\u2019t enabled yet — try again in a bit.';
+      if (code === 'auth/too-many-requests') return 'Too many attempts — wait a minute and try again.';
+      return 'Couldn\u2019t sign in. Check your connection and try again.';
+    }
+
+    async function submitAuth() {
+      const email = emailEl.value.trim();
+      const password = passEl.value;
+      if (!email || !password) { errEl.textContent = 'Enter your email and password.'; return; }
+      goBtn.disabled = true;
+      errEl.textContent = '';
+      try {
+        if (mode === 'signup') await auth.createUserWithEmailAndPassword(email, password);
+        else await auth.signInWithEmailAndPassword(email, password);
+        // onAuthStateChanged takes it from here.
+      } catch (e) {
+        errEl.textContent = friendlyError(e);
+      } finally {
+        goBtn.disabled = false;
+      }
+    }
+
+    goBtn.addEventListener('click', submitAuth);
+    passEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitAuth(); });
+    emailEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') passEl.focus(); });
+    if (!ALLOW_SIGNUP) switchWrap.style.display = 'none';
+    setMode('signin');
+
+    function attachUser() {
+      docRef = db.collection('todoApp').doc('shared');
+      snapUnsub = docRef.onSnapshot((snap) => {
+        if (snap.metadata.hasPendingWrites) return; // ignore our own optimistic write
+        onRemoteChange();
+      }, () => { /* snapshot errors: stay on the local copy */ });
+      onRemoteChange(); // pull cloud state into the UI
+    }
+
+    // Firebase persists the session on this device — after the first
+    // sign-in the gate stays hidden and the list opens directly.
+    auth.onAuthStateChanged((user) => {
+      if (user) {
+        gate.classList.remove('show');
+        if (!snapUnsub) attachUser();
+      } else {
+        if (snapUnsub) { snapUnsub(); snapUnsub = null; }
+        docRef = null;
+        gate.classList.add('show');
+      }
+    });
 
     window.storage = firestoreStorage;
+    window.__signOut = () => auth.signOut();
   } catch (e) {
     window.storage = localFallback;
   }

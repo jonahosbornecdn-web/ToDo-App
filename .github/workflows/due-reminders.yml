@@ -25,3 +25,5 @@ jobs:
         env:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          NOTIFIER_EMAIL: ${{ secrets.NOTIFIER_EMAIL }}
+          NOTIFIER_PASSWORD: ${{ secrets.NOTIFIER_PASSWORD }}

@@ -3,7 +3,8 @@
 // Free: Web Push has no per-message cost; the scheduler is a GitHub Actions cron.
 //
 // What it does, once a day (~7am America/Edmonton):
-//   1. Signs in to Firebase anonymously (same as the web app) and reads the
+//   1. Signs in to Firebase as the notifier service account (email+password
+//      from NOTIFIER_EMAIL / NOTIFIER_PASSWORD env vars) and reads the
 //      shared todoApp/shared document.
 //   2. Finds tasks that are overdue, due today, or due tomorrow and haven't
 //      been reminded about yet today.
@@ -21,6 +22,8 @@ const SUBS_KEY = 'todo:push-subscriptions';
 const VAPID_PUBLIC_KEY = 'BDRv_mGOw2gYzHgHYj65rl5suCfeotXhC8SNKFmmsC6mf9rP9ru3_gzoDHj9vGh-k-PMfw9hnZmM4hM4qwZK6so';
 const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY;
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:todo-app@example.com';
+const NOTIFIER_EMAIL = process.env.NOTIFIER_EMAIL;
+const NOTIFIER_PASSWORD = process.env.NOTIFIER_PASSWORD;
 const DRY_RUN = process.env.DRY_RUN === '1';
 
 const webpush = require('web-push');
@@ -37,12 +40,16 @@ function addDays(iso, n) {
   return dt.toISOString().slice(0, 10);
 }
 
-async function anonIdToken() {
-  // Empty-body signUp creates an anonymous user via the REST API.
-  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_API_KEY}`, {
+async function serviceIdToken() {
+  // Email/password sign-in for the notifier service account (see
+  // .github/workflows/due-reminders.yml for where the creds come from).
+  if (!NOTIFIER_EMAIL || !NOTIFIER_PASSWORD) {
+    throw new Error('NOTIFIER_EMAIL and NOTIFIER_PASSWORD env vars are required');
+  }
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_API_KEY}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ returnSecureToken: true }),
+    body: JSON.stringify({ email: NOTIFIER_EMAIL, password: NOTIFIER_PASSWORD, returnSecureToken: true }),
   });
   if (!res.ok) throw new Error(`auth failed: ${res.status} ${await res.text()}`);
   const data = await res.json();
@@ -88,7 +95,7 @@ async function main() {
   if (!VAPID_PRIVATE_KEY && !DRY_RUN) throw new Error('VAPID_PRIVATE_KEY env var is required');
   if (VAPID_PRIVATE_KEY) webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
-  const idToken = await anonIdToken();
+  const idToken = await serviceIdToken();
   const fields = await readDoc(idToken);
 
   const tasksRaw = strVal(fields, TASKS_KEY);

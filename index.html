@@ -961,7 +961,7 @@
     <footer>
       <div class="footer-status">
         <span id="counter"></span>
-        <span id="app-version" title="App version">v16</span>
+        <span id="app-version" title="App version">v17</span>
       </div>
       <div class="footer-actions">
         <button id="sort-color">sort by colour</button>
@@ -1168,7 +1168,16 @@
     window.storage = firestoreStorage;
     window.__signOut = () => auth.signOut();
   } catch (e) {
+    // Firebase (sign-in/database) failed to load — usually a content blocker
+    // or a network problem. Show the gate with an explanation instead of
+    // silently falling back to an empty local list with no way to sign in.
     window.storage = localFallback;
+    try {
+      var gateEl = document.getElementById('login-gate');
+      var errEl = document.getElementById('login-error');
+      if (errEl) errEl.textContent = 'Couldn\u2019t reach the sign-in service. Check your connection or turn off any content blocker for this site, then reload.';
+      if (gateEl) gateEl.classList.add('show');
+    } catch (e2) {}
   }
 
   if ('serviceWorker' in navigator) {

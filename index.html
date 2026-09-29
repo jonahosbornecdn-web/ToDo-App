@@ -1078,9 +1078,11 @@
     const errEl = document.getElementById('login-error');
     let mode = 'signin'; // or 'signup'
 
-    // Set to false once the owner's account exists — hides the create-account UI.
-    // (New sign-ups are also disabled server-side in the Firebase console.)
-    const ALLOW_SIGNUP = true;
+    // Account creation is closed: the owner's account already exists.
+    // Even if someone reached the sign-up code path, the Firestore rules
+    // only allow the owner's UID and the notifier's UID, so a new account
+    // could read and write nothing.
+    const ALLOW_SIGNUP = false;
 
     function bindSwitch() {
       const btn = document.getElementById('login-switch');

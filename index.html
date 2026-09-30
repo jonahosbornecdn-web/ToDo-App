@@ -961,7 +961,7 @@
     <footer>
       <div class="footer-status">
         <span id="counter"></span>
-        <span id="app-version" title="App version">v18</span>
+        <span id="app-version" title="App version">v19</span>
       </div>
       <div class="footer-actions">
         <button id="sort-color">sort by colour</button>
@@ -1150,7 +1150,7 @@
       snapUnsub = docRef.onSnapshot((snap) => {
         if (snap.metadata.hasPendingWrites) return; // ignore our own optimistic write
         onRemoteChange();
-      }, () => { /* snapshot errors: stay on the local copy */ });
+      }, (err) => { if (err && err.code === 'permission-denied') auth.signOut(); });
       onRemoteChange(); // pull cloud state into the UI
     }
 
@@ -1162,8 +1162,14 @@
     // any error message.
     let authResolved = false;
     setTimeout(() => { if (!authResolved) gate.classList.add('show'); }, 5000);
-    auth.onAuthStateChanged((user) => {
+    auth.onAuthStateChanged(async (user) => {
       authResolved = true;
+      // Kill stale or anonymous sessions: a persisted session with an
+      // invalid token would otherwise hide the gate while Firestore
+      // rejects reads. signOut() re-fires this callback with null,
+      // which shows the gate.
+      if (user && user.isAnonymous) { await auth.signOut(); return; }
+      if (user) { try { await user.getIdToken(true); } catch (e) { await auth.signOut(); return; } }
       if (user) {
         gate.classList.remove('show');
         if (!snapUnsub) attachUser();
